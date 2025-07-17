@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sinusoidi con Pyodide</title>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    label, input {
+      display: block;
+      margin: 10px 0;
+    }
+    #plot {
+      max-width: 600px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Controlla due sinusoidi (Pyodide)</h1>
+
+  <label for="amp1">Ampiezza Sinusoide 1: <span id="amp1-val">1.0</span></label>
+  <input type="range" id="amp1" min="0" max="5" step="0.1" value="1.0">
+
+  <label for="amp2">Ampiezza Sinusoide 2: <span id="amp2-val">1.0</span></label>
+  <input type="range" id="amp2" min="0" max="5" step="0.1" value="1.0">
+
+  <div id="plot"></div>
+
+  <script type="text/javascript">
+    async function main() {
+      const pyodide = await loadPyodide();
+      await pyodide.loadPackage(["numpy", "matplotlib"]);
+
+      const code = `
+import numpy as np
+import matplotlib.pyplot as plt
+import io
+import base64
+from js import document
+
+def plot():
+    A1 = float(document.getElementById("amp1").value)
+    A2 = float(document.getElementById("amp2").value)
+    x = np.linspace(0, 2 * np.pi, 1000)
+    y1 = A1 * np.sin(x)
+    y2 = A2 * np.sin(2 * x)
+    fig, ax = plt.subplots()
+    ax.plot(x, y1, label=f"A1 * sin(x) = {A1:.1f}")
+    ax.plot(x, y2, label=f"A2 * sin(2x) = {A2:.1f}")
+    ax.set_title("Due sinusoidi controllate da slider")
+    ax.legend()
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    img_str = base64.b64encode(buf.read()).decode('utf-8')
+    buf.close()
+    plt.close(fig)
+    document.getElementById("plot").innerHTML = f'<img src="data:image/png;base64,{img_str}" />'
+
+plot()
+`;
+      function updatePlot() {
+        pyodide.runPython("plot()");
+      }
+
+      pyodide.runPython(code);
+
+      document.getElementById("amp1").addEventListener("input", function() {
+        document.getElementById("amp1-val").textContent = this.value;
+        updatePlot();
+      });
+      document.getElementById("amp2").addEventListener("input", function() {
+        document.getElementById("amp2-val").textContent = this.value;
+        updatePlot();
+      });
+    }
+
+    main();
+  </script>
+</body>
+</html>

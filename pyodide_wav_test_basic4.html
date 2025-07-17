@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<title>WAV con Gain Realtime - Minimal</title>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  #plot { margin-top: 20px; }
+  label, button, input[type=range] { display: block; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <h2>WAV con controllo Gain realtime</h2>
+
+  <input type="file" id="wavfile" accept=".wav" />
+  <label>Gain: <span id="gainVal">1.00</span></label>
+  <input type="range" id="gainSlider" min="0" max="2" step="0.01" value="1.0" />
+  <button id="playBtn" disabled>▶️ Play</button>
+  <button id="stopBtn" disabled>⏹️ Stop</button>
+
+  <div id="plot"></div>
+
+<script>
+(async () => {
+  const pyodide = await loadPyodide();
+  await pyodide.loadPackage(["numpy", "scipy", "matplotlib"]);
+
+  let audioCtx = null;
+  let sourceNode = null;
+  let gainNode = null;
+  let audioBuffer = null;
+
+  function ensureAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  // JS: decodifica il wav e memorizza AudioBuffer
+  async function decodeWavArrayBuffer(arrayBuffer) {
+    ensureAudioContext();
+    return await audioCtx.decodeAudioData(arrayBuffer);
+  }
+
+  // JS: riproduce audio con gain attuale
+  function playAudio() {
+    if (!audioBuffer) return;
+    stopAudio(); // stop prima se qualcosa suona
+
+    sourceNode = audioCtx.createBufferSource();
+    gainNode = audioCtx.createGain();
+
+    sourceNode.buffer = audioBuffer;
+    sourceNode.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    gainNode.gain.value = parseFloat(document.getElementById("gainSlider").value);
+
+    sourceNode.start();
+
+    sourceNode.onended = () => {
+      sourceNode.disconnect();
+      gainNode.disconnect();
+      sourceNode = null;
+      gainNode = null;
+    };
+  }
+
+  function stopAudio() {
+    if (sourceNode) {
+      sourceNode.stop();
+      sourceNode.disconnect();
+      gainNode.disconnect();
+      sourceNode = null;
+      gainNode = null;
+    }
+  }
+
+  // Python: legge il wav e disegna la forma d'onda
+  const pythonCode = `
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.io import wavfile
+from js import document
+import io
+import base64
+
+def draw_waveform(wav_bytes):
+    # Legge wav da bytes
+    rate, data = wavfile.read(io.BytesIO(wav_bytes.to_py()))
+    if data.ndim > 1:
+        data = data[:,0]  # prendi solo primo canale
+
+    times = np.linspace(0, len(data)/rate, num=len(data))
+
+    fig, ax = plt.subplots(figsize=(8,2))
+    ax.plot(times, data, color='blue')
+    ax.set_xlabel("Tempo [s]")
+    ax.set_ylabel("Ampiezza")
+    ax.grid(True, linestyle='--', alpha=0.5)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.1)
+    buf.seek(0)
+    img_str = base64.b64encode(buf.read()).decode('utf-8')
+    plt.close(fig)
+
+    document.getElementById("plot").innerHTML = f"<img src='data:image/png;base64,{img_str}' width='100%'/>"
+`;
+
+  // Proxy per chiamare funzione python draw_waveform da JS
+  await pyodide.runPythonAsync(pythonCode);
+  const draw_waveform = pyodide.globals.get("draw_waveform");
+
+  // Handler caricamento file
+  document.getElementById("wavfile").addEventListener("change", async (evt) => {
+    const file = evt.target.files[0];
+    if (!file) return;
+
+    const arrayBuffer = await file.arrayBuffer();
+
+    // Chiama python per disegnare la forma d'onda
+    draw_waveform(new Uint8Array(arrayBuffer));
+
+    // Decodifica wav in audioBuffer JS
+    audioBuffer = await decodeWavArrayBuffer(arrayBuffer);
+
+    document.getElementById("playBtn").disabled = false;
+    document.getElementById("stopBtn").disabled = false;
+  });
+
+  // Play button
+  document.getElementById("playBtn").onclick = () => {
+    ensureAudioContext();
+    // Necessario per gestire autoplay policy browser
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    playAudio();
+  };
+
+  // Stop button
+  document.getElementById("stopBtn").onclick = () => {
+    stopAudio();
+  };
+
+  // Gain slider
+  document.getElementById("gainSlider").addEventListener("input", (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById("gainVal").textContent = val.toFixed(2);
+    if (gainNode) {
+      gainNode.gain.value = val;
+    }
+  });
+})();
+</script>
+</body>
+</html>

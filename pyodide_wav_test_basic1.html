@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Visualizza WAV con Pyodide</title>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #plot { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h2>Visualizza forma d'onda WAV</h2>
+  <input type="file" id="wavfile" accept=".wav" />
+  <div id="plot"></div>
+
+  <script>
+    async function main() {
+      const pyodide = await loadPyodide();
+      await pyodide.loadPackage(["numpy", "matplotlib", "scipy"]);
+      console.log("✅ Pyodide & packages ready");
+
+      const code = `
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.io import wavfile
+from js import document, Uint8Array, console, window
+from pyodide.ffi import create_proxy
+import io
+import base64
+
+def handle_file(evt):
+    file = evt.target.files.item(0)
+    reader = window.FileReader.new()
+
+    def onload(e):
+        bytes_data = Uint8Array.new(reader.result.to_py())
+        raw = io.BytesIO(bytes_data.to_py())
+        
+        try:
+            sample_rate, data = wavfile.read(raw)
+            console.log(f"✅ Sample rate: {sample_rate}, shape: {data.shape}")
+            if data.ndim > 1:
+                data = data[:, 0]  # solo primo canale se stereo
+
+            duration = len(data) / sample_rate
+            times = np.linspace(0, duration, len(data))
+
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.plot(times, data)
+            ax.set_xlabel("Time [s]")
+            ax.set_ylabel("Amplitude")
+            ax.set_title("Forma d'onda WAV")
+
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png')
+            buf.seek(0)
+            img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+            buf.close()
+            plt.close(fig)
+
+            img_html = f"<img src='data:image/png;base64,{img_base64}' width='100%'/>"
+            document.getElementById("plot").innerHTML = img_html
+        except Exception as ex:
+            console.log(f"❌ Errore: {ex}")
+
+    reader.onload = onload
+    reader.readAsArrayBuffer(file)
+
+handle_file_proxy = create_proxy(handle_file)
+document.getElementById("wavfile").addEventListener("change", handle_file_proxy)
+`;
+      pyodide.runPython(code);
+    }
+
+    main();
+  </script>
+</body>
+</html>

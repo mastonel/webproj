@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Forma d'onda e riproduzione WAV (quasi solo Python)</title>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #plot { margin-top: 20px; }
+    button { margin-top: 10px; padding: 10px 20px; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <h2>🎵 Forma d'onda e Riproduzione WAV</h2>
+  <input type="file" id="wavfile" accept=".wav" />
+  <button id="playBtn" disabled>▶️ Riproduci</button>
+  <div id="plot"></div>
+
+  <script>
+    async function main() {
+      const pyodide = await loadPyodide();
+      await pyodide.loadPackage(["numpy", "matplotlib", "scipy"]);
+
+      const pythonCode = `
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.io import wavfile
+from js import document, Uint8Array, window, console
+from pyodide.ffi import create_proxy
+import io
+import base64
+
+# Funzione Python chiamata quando viene caricato il file
+def handle_file(evt):
+    file = evt.target.files.item(0)
+    reader = window.FileReader.new()
+
+    def onload(e):
+        global audio_array_buffer
+        audio_array_buffer = reader.result
+        bytes_data = Uint8Array.new(audio_array_buffer.to_py())
+        raw = io.BytesIO(bytes_data.to_py())
+
+        # Legge il WAV in Python
+        try:
+            rate, data = wavfile.read(raw)
+            if data.ndim > 1:
+                data = data[:, 0]  # solo canale sinistro
+            times = np.linspace(0, len(data) / rate, num=len(data))
+
+            # Grafico con matplotlib
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.plot(times, data)
+            ax.set_xlabel("Tempo [s]")
+            ax.set_ylabel("Ampiezza")
+            ax.set_title("Forma d'onda WAV")
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png')
+            buf.seek(0)
+            img_str = base64.b64encode(buf.read()).decode('utf-8')
+            buf.close()
+            plt.close(fig)
+
+            document.getElementById("plot").innerHTML = f"<img src='data:image/png;base64,{img_str}' width='100%'>"
+            document.getElementById("playBtn").disabled = False
+            console.log("✅ WAV caricato e visualizzato.")
+        except Exception as e:
+            console.log(f"Errore: {e}")
+
+    reader.onload = onload
+    reader.readAsArrayBuffer(file)
+
+# Funzione Python che chiama JS per suonare
+def play_audio(event=None):
+    if not 'audio_array_buffer' in globals():
+        console.log("⚠️ Nessun file audio caricato")
+        return
+    # Richiama una funzione JS che usa AudioContext per suonare
+    window.playWav(audio_array_buffer)
+
+# Associazione eventi
+handle_file_proxy = create_proxy(handle_file)
+document.getElementById("wavfile").addEventListener("change", handle_file_proxy)
+
+play_proxy = create_proxy(play_audio)
+document.getElementById("playBtn").addEventListener("click", play_proxy)
+`;
+      pyodide.runPython(pythonCode);
+    }
+
+    main();
+
+    // ✅ MINIMO JS per suonare l’audio: chiamato da Python
+    window.playWav = function(arrayBuffer) {
+      const context = new (window.AudioContext || window.webkitAudioContext)();
+      context.decodeAudioData(arrayBuffer.slice(0), (buffer) => {
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(context.destination);
+        source.start();
+      }, (err) => {
+        console.error("Errore nella decodifica audio:", err);
+      });
+    };
+  </script>
+</body>
+</html>

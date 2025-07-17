@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>WAV con Gain e Pyodide con assi</title>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #plot { margin-top: 20px; }
+    label, button, input[type=range] { display: block; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>WAV con controllo Gain</h2>
+  <input type="file" id="wavfile" accept=".wav" />
+  
+  <label>Gain: <span id="gainVal">1.0</span></label>
+  <input type="range" id="gainSlider" min="0" max="2" step="0.01" value="1.0" />
+  
+  <button id="playBtn" disabled>▶️ Riproduci</button>
+  <div id="plot"></div>
+
+<script>
+(async () => {
+  const pyodide = await loadPyodide();
+  await pyodide.loadPackage(["numpy", "scipy", "matplotlib"]);
+
+  const code = `
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.io import wavfile
+from js import document, Uint8Array, window
+from pyodide.ffi import create_proxy
+import io
+import base64
+
+audio_rate = None
+audio_data = None
+
+def handle_file(evt):
+    global audio_rate, audio_data
+    file = evt.target.files.item(0)
+    reader = window.FileReader.new()
+    def onload(e):
+        global audio_rate, audio_data
+        array_buffer = reader.result
+        bytes_data = Uint8Array.new(array_buffer.to_py())
+        raw = io.BytesIO(bytes_data.to_py())
+
+        rate, data = wavfile.read(raw)
+        if data.ndim > 1:
+            data = data[:, 0]
+        audio_rate = rate
+        audio_data = data.astype(np.float32)
+
+        times = np.linspace(0, len(data)/rate, num=len(data))
+        fig, ax = plt.subplots(figsize=(8, 2))
+        ax.plot(times, data, color='blue')
+        ax.set_xlabel("Tempo [s]")
+        ax.set_ylabel("Ampiezza")
+        ax.grid(True, linestyle='--', alpha=0.5)
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.1)
+        buf.seek(0)
+        img_str = base64.b64encode(buf.read()).decode('utf-8')
+        buf.close()
+        plt.close(fig)
+
+        document.getElementById("plot").innerHTML = f"<img src='data:image/png;base64,{img_str}' width='100%'/>"
+        document.getElementById("playBtn").disabled = False
+
+    reader.onload = onload
+    reader.readAsArrayBuffer(file)
+
+def play_audio(evt=None):
+    global audio_rate, audio_data
+    if audio_data is None:
+        return
+    gain = float(document.getElementById("gainSlider").value)
+    data_mod = audio_data * gain
+    max_val = np.max(np.abs(data_mod))
+    if max_val > 32767:
+        data_mod = data_mod * (32767 / max_val)
+    data_out = data_mod.astype(np.int16)
+
+    buf = io.BytesIO()
+    wavfile.write(buf, audio_rate, data_out)
+    buf.seek(0)
+    wav_bytes = buf.read()
+    buf.close()
+
+    array = Uint8Array.new(wav_bytes)
+    window.playWav(array)
+
+handle_file_proxy = create_proxy(handle_file)
+document.getElementById("wavfile").addEventListener("change", handle_file_proxy)
+
+play_audio_proxy = create_proxy(play_audio)
+document.getElementById("playBtn").addEventListener("click", play_audio_proxy)
+`;
+
+  pyodide.runPython(code);
+
+  window.playWav = (uint8array) => {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.decodeAudioData(uint8array.buffer.slice(0), (buffer) => {
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start();
+    });
+  };
+
+  document.getElementById("gainSlider").addEventListener("input", e => {
+    document.getElementById("gainVal").textContent = e.target.value;
+  });
+})();
+</script>
+</body>
+</html>

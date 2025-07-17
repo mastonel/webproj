@@ -1,0 +1,19 @@
+<p><H2><center>Here's an embedded widget!</center></H2></p>
+<H3><center>Click on the top left button to activate audio</center></H3></p>
+
+<center>
+<faust-widget>
+<!--
+
+declare options "[midi:on][nvoices:12]";
+import("stdfaust.lib");
+freq = hslider("freq",200,50,1000,0.01);
+gain = hslider("gain",0.5,0,1,0.01);
+gate = button("gate");
+envelope = en.adsr(0.01,0.01,0.8,0.1,gate)*gain;
+process = os.sawtooth(freq)*envelope;
+-->
+</faust-widget>
+</center>
+
+<script src="https://cdn.jsdelivr.net/npm/@grame/faust-web-component@0.5.5/dist/faust-web-component.js"></script>
